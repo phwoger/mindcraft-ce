@@ -382,7 +382,7 @@ export async function attackEntity(bot, entity, kill=true) {
                 return false;
             }
         }
-        log(bot, `Successfully killed ${entity.name}.`);
+        log(bot, `Successfully killed ${entity.username || entity.name}.`);
         await pickupNearbyItems(bot);
         return true;
     }
