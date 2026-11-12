@@ -12,6 +12,13 @@ let mc_version = settings.minecraft_version;
 let mcdata = null;
 let Item = null;
 
+export function initializeMcData(version = mc_version) {
+    mc_version = version;
+    mcdata = minecraftData(version);
+    Item = prismarine_items(version);
+    return mcdata;
+}
+
 const FABRIC_REGISTRY_SYNC = 'fabric:registry/sync';
 const FABRIC_REGISTRY_SYNC_COMPLETE = 'fabric:registry/sync/complete';
 
@@ -175,8 +182,7 @@ bot.once('login', () => {
     } else {
         mc_version = settings.minecraft_version;
     }
-    mcdata = minecraftData(mc_version);
-    Item = prismarine_items(mc_version);
+    initializeMcData(mc_version);
 });
 
     return bot;
