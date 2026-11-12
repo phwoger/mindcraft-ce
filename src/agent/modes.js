@@ -365,6 +365,14 @@ class ModeController {
         return modes_map[mode_name].on;
     }
 
+    isActive(mode_name) {
+        return modes_map[mode_name]?.active === true;
+    }
+
+    isPaused(mode_name) {
+        return modes_map[mode_name]?.paused === true;
+    }
+
     pause(mode_name) {
         modes_map[mode_name].paused = true;
     }

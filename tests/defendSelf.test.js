@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import Vec3 from 'vec3';
 import { initializeMcData } from '../src/utils/mcdata.js';
+import { ActionManager } from '../src/agent/action_manager.js';
 
 import { defendSelf } from '../src/agent/library/skills.js';
 import { initModes } from '../src/agent/modes.js';
@@ -160,17 +162,22 @@ test('self_defense holds active until the defense task completes and clears it',
     await agent.bot.modes.update();
     assert.equal(actions.calls.length, 1);
     assert.equal(actions.calls[0].label, 'mode:self_defense');
+    assert.equal(agent.bot.modes.isActive('self_defense'), true);
 
     await agent.bot.modes.update();
     assert.equal(actions.calls.length, 1);
+    assert.equal(agent.bot.modes.isActive('self_defense'), true);
 
     actions.calls[0].resolve({ success: true, message: 'done', interrupted: false });
     await settle();
+    assert.equal(agent.bot.modes.isActive('self_defense'), false);
 
     await agent.bot.modes.update();
     assert.equal(actions.calls.length, 2);
+    assert.equal(agent.bot.modes.isActive('self_defense'), true);
     actions.calls[1].resolve({ success: true, message: 'done', interrupted: false });
     await settle();
+    assert.equal(agent.bot.modes.isActive('self_defense'), false);
 });
 
 test('self_defense re-entry starts only one defense and the original completes', async () => {
@@ -196,10 +203,26 @@ test('self_defense does not start or report success with no hostiles', async () 
     await agent.bot.modes.update();
     await settle();
     assert.equal(starts, 0);
+    assert.equal(agent.bot.modes.isActive('self_defense'), false);
     assert.equal(agent.bot.modes.flushBehaviorLog(), '');
 
     await agent.bot.modes.update();
     assert.equal(starts, 0);
+    assert.equal(agent.bot.modes.isActive('self_defense'), false);
+});
+
+test('self_defense does not start when a nearby hostile has no clear path', async () => {
+    let starts = 0;
+    const agent = makeModeAgent(() => {
+        starts++;
+        return Promise.resolve({ success: true, message: 'done', interrupted: false });
+    }, [makeModeEnemy()], 'self_defense', {
+        pathfinder: { getPathTo: async () => ({ status: 'noPath' }) },
+    });
+
+    await updateMode(agent);
+    assert.equal(starts, 0);
+    assert.equal(agent.bot.modes.isActive('self_defense'), false);
 });
 
 test('self_defense clears active when the skill reports false and remains resumable', async () => {
@@ -428,8 +451,10 @@ test('self_defense recovers when runAction throws synchronously', async () => {
 
     await updateMode(agent);
     assert.equal(starts, 1);
+    assert.equal(agent.bot.modes.isActive('self_defense'), false);
     await updateMode(agent);
     assert.equal(starts, 2);
+    assert.equal(agent.bot.modes.isActive('self_defense'), false);
 });
 
 test('self_defense recovers after an interrupted mode result', async () => {
@@ -446,8 +471,10 @@ test('self_defense recovers after an interrupted mode result', async () => {
 
     await updateMode(agent);
     assert.equal(starts, 1);
+    assert.equal(agent.bot.modes.isActive('self_defense'), false);
     await updateMode(agent);
     assert.equal(starts, 2);
+    assert.equal(agent.bot.modes.isActive('self_defense'), false);
 });
 
 test('self_defense unpauses and resumes after pause during an active task', async () => {
@@ -456,13 +483,100 @@ test('self_defense unpauses and resumes after pause during an active task', asyn
 
     await agent.bot.modes.update();
     assert.equal(actions.calls.length, 1);
+    assert.equal(agent.bot.modes.isActive('self_defense'), true);
 
     agent.bot.modes.pause('self_defense');
     actions.calls[0].resolve({ success: true, message: 'done', interrupted: false });
     await settle();
+    assert.equal(agent.bot.modes.isActive('self_defense'), false);
+    assert.equal(agent.bot.modes.isPaused('self_defense'), true);
 
     await updateMode(agent);
     assert.equal(actions.calls.length, 2);
+    assert.equal(agent.bot.modes.isActive('self_defense'), true);
+    assert.equal(agent.bot.modes.isPaused('self_defense'), false);
     actions.calls[1].resolve({ success: true, message: 'done', interrupted: false });
     await settle();
+    assert.equal(agent.bot.modes.isActive('self_defense'), false);
+});
+
+function makeRealActionModeAgent() {
+    const enemy = makeModeEnemy();
+    const bot = Object.assign(new EventEmitter(), {
+        entity: { position: new Vec3(0, 0, 0) },
+        registry,
+        inventory: { items: () => [] },
+        output: '',
+        interrupt_code: false,
+        pvp: {
+            attacks: 0,
+            stops: 0,
+            attack() { this.attacks++; },
+            stop() { this.stops++; },
+        },
+        pathfinder: {
+            setMovements: () => {},
+            getPathTo: async () => ({ status: 'success' }),
+            goto: async () => {},
+        },
+        nearestEntity(predicate) {
+            return predicate(enemy) ? enemy : null;
+        },
+    });
+    let manager;
+    const agent = {
+        bot,
+        shut_up: true,
+        prompter: { getInitModes: () => null },
+        self_prompter: { isActive: () => false },
+        history: { add: () => Promise.resolve() },
+        clearBotLogs() {
+            bot.output = '';
+            bot.interrupt_code = false;
+        },
+        requestInterrupt() {
+            bot.interrupt_code = true;
+            bot.pvp.stop();
+        },
+        cleanKill: () => {},
+        isIdle: () => !manager.executing,
+    };
+    manager = new ActionManager(agent);
+    agent.actions = manager;
+    initModes(agent);
+    for (const name of Object.keys(agent.bot.modes.getJson())) {
+        agent.bot.modes.setOn(name, false);
+    }
+    agent.bot.modes.setOn('self_defense', true);
+    return { agent, manager, bot };
+}
+
+test('a real ActionManager interruption releases mode ownership and pending work', async () => {
+    const { agent, manager, bot } = makeRealActionModeAgent();
+    try {
+        await agent.bot.modes.update();
+        assert.equal(manager.executing, true);
+        assert.equal(agent.bot.modes.isActive('self_defense'), true);
+
+        await manager.stop();
+        await settle();
+
+        assert.equal(manager.executing, false);
+        assert.equal(manager.currentActionLabel, '');
+        assert.equal(manager._pendingAction, null);
+        assert.equal(agent.bot.modes.isActive('self_defense'), false);
+        assert.equal(agent.bot.modes.isPaused('self_defense'), true);
+
+        await agent.bot.modes.update();
+        assert.equal(manager.executing, true);
+        assert.equal(agent.bot.modes.isActive('self_defense'), true);
+
+        await manager.stop();
+        await settle();
+        assert.equal(manager.executing, false);
+        assert.equal(manager._pendingAction, null);
+        assert.equal(agent.bot.modes.isActive('self_defense'), false);
+    } finally {
+        await manager.stop();
+    }
 });
