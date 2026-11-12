@@ -415,3 +415,54 @@ test('elbow_room returns to idle and resumable after a rejected task', async () 
     await updateMode(agent);
     assert.equal(task.starts, 2);
 });
+
+test('self_defense recovers when runAction throws synchronously', async () => {
+    let starts = 0;
+    const agent = makeModeAgent(() => {
+        starts++;
+        if (starts === 1) {
+            throw new Error('synchronous defense failure');
+        }
+        return Promise.resolve({ success: true, message: 'done', interrupted: false });
+    }, [makeModeEnemy()]);
+
+    await updateMode(agent);
+    assert.equal(starts, 1);
+    await updateMode(agent);
+    assert.equal(starts, 2);
+});
+
+test('self_defense recovers after an interrupted mode result', async () => {
+    let starts = 0;
+    const agent = makeModeAgent(() => {
+        starts++;
+        return Promise.resolve({
+            success: false,
+            message: 'interrupted',
+            interrupted: true,
+            timedout: false,
+        });
+    }, [makeModeEnemy()]);
+
+    await updateMode(agent);
+    assert.equal(starts, 1);
+    await updateMode(agent);
+    assert.equal(starts, 2);
+});
+
+test('self_defense unpauses and resumes after pause during an active task', async () => {
+    const actions = deferredActions();
+    const agent = makeModeAgent(actions.runAction, [makeModeEnemy()]);
+
+    await agent.bot.modes.update();
+    assert.equal(actions.calls.length, 1);
+
+    agent.bot.modes.pause('self_defense');
+    actions.calls[0].resolve({ success: true, message: 'done', interrupted: false });
+    await settle();
+
+    await updateMode(agent);
+    assert.equal(actions.calls.length, 2);
+    actions.calls[1].resolve({ success: true, message: 'done', interrupted: false });
+    await settle();
+});
