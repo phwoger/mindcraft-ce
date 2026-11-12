@@ -970,28 +970,42 @@ export async function viewChest(bot) {
     return true;
 }
 
-export async function consume(bot, itemName="") {
+export async function consume(bot, itemName="", num=1) {
     /**
      * Eat/drink the given item.
      * @param {MinecraftBot} bot, reference to the minecraft bot.
      * @param {string} itemName, the item to eat/drink.
-     * @returns {Promise<boolean>} true if the item was eaten, false otherwise.
+     * @param {number} num, how many items to consume. Defaults to 1.
+     * @returns {Promise<boolean>} true if at least one item was eaten, false otherwise.
      * @example
-     * await skills.eat(bot, "apple");
+     * await skills.consume(bot, "apple");
      **/
-    let item, name;
-    if (itemName) {
-        item = bot.inventory.findInventoryItem(itemName);
-        name = itemName;
+    const requested = Number.isFinite(num) ? Math.max(1, Math.floor(num)) : 1;
+    let consumed = 0;
+    while (consumed < requested) {
+        if ((bot.food ?? 20) >= 20) {
+            if (consumed === 0)
+                log(bot, 'You are not hungry.');
+            break;
+        }
+        const item = itemName ? bot.inventory.findInventoryItem(itemName) : null;
+        if (!item) {
+            if (consumed === 0)
+                log(bot, `You do not have any ${itemName} to eat.`);
+            break;
+        }
+        await bot.equip(item, 'hand');
+        try {
+            await bot.consume();
+        } catch (err) {
+            log(bot, `Could not consume ${itemName}: ${err.message}`);
+            break;
+        }
+        consumed++;
     }
-    if (!item) {
-        log(bot, `You do not have any ${name} to eat.`);
-        return false;
-    }
-    await bot.equip(item, 'hand');
-    await bot.consume();
-    log(bot, `Consumed ${item.name}.`);
-    return true;
+    if (consumed > 0)
+        log(bot, `Consumed ${consumed} ${itemName}.`);
+    return consumed > 0;
 }
 
 

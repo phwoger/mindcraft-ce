@@ -27,6 +27,26 @@ test('26.3 protocol and gameplay data load out of the box', () => {
     assert.ok(Object.keys(data.items).length > 0, '26.3 must expose item data');
 });
 
+test('26.3 gameplay data uses 26.3 block-state and item IDs', () => {
+    const data = minecraftData('26.3');
+    assert.equal(Object.keys(data.blocks).length, 1286);
+    assert.equal(Object.keys(data.items).length, 1658);
+    assert.equal(data.blocksByName.oak_log.defaultState, 140);
+    assert.equal(data.blocksByStateId[140].name, 'oak_log');
+    assert.equal(data.blocksByName.spruce_log.defaultState, 143);
+    assert.equal(data.itemsByName.oak_log.id, 163);
+    assert.equal(data.itemsByName.crafting_table.id, 405);
+    assert.equal(data.foodsByName.cooked_beef.foodPoints, 8);
+    assert.equal(data.foodsByName.cooked_beef.saturationRatio, 1.6);
+});
+
+test('26.3 player-action enum shift is advertised to mineflayer', () => {
+    const features = require('minecraft-data/minecraft-data/data/pc/common/features.json');
+    const feature = features.find(entry => entry.name === 'playerActionHasChangeDestroyDirection');
+    assert.ok(feature, '26.3 player-action feature must be installed');
+    assert.ok(feature.versions.includes('26.3'), 'feature must cover 26.3');
+});
+
 test('prismarine 26.3 runtime patches are installed', () => {
     assert.doesNotThrow(() => prismarineChunk('26.3'));
 

@@ -5,7 +5,8 @@
  * minecraft-data's GitHub repository has no root package.json, so the 26.3
  * protocol data cannot be installed as a GitHub dependency. The published
  * package is installed normally, then this script adds the 26.3 protocol,
- * version metadata, data paths and data.js entry from vendor/minecraft-data.
+ * version metadata, gameplay data, data paths and data.js entry from
+ * vendor/minecraft-data.
  *
  * Safe to run repeatedly (npm postinstall after every install / reinstall).
  */
@@ -21,6 +22,23 @@ const vendorDir = path.join(projectRoot, 'vendor', 'minecraft-data', '26.3');
 const MINECRAFT_VERSION = '26.3';
 const PROTOCOL_VERSION = 777;
 const DATA_VERSION = 5023;
+const GAMEPLAY_FILES = [
+    'blocks.json',
+    'items.json',
+    'entities.json',
+    'foods.json',
+    'recipes.json',
+    'blockCollisionShapes.json',
+];
+const GAMEPLAY_DATA_KEYS = [
+    'blocks',
+    'items',
+    'entities',
+    'foods',
+    'recipes',
+    'blockCollisionShapes',
+];
+const PLAYER_ACTION_FEATURE = 'playerActionHasChangeDestroyDirection';
 
 function fail(message) {
     throw new Error(`[minecraft 26.3 install] ${message}`);
@@ -59,10 +77,13 @@ for (const file of [protocolVersionsFile, versionsFile, dataPathsFile, dataJsFil
     }
 }
 
-// 1. Copy the protocol and version metadata.
+// 1. Copy the protocol, version metadata, and 26.3 gameplay data. Block
+// state IDs and item IDs changed in 26.3; reusing 26.1 data makes oak logs
+// decode as spruce logs and corrupts inventory/recipe lookups.
 fs.mkdirSync(targetDir, { recursive: true });
-fs.copyFileSync(path.join(vendorDir, 'protocol.json'), path.join(targetDir, 'protocol.json'));
-fs.copyFileSync(path.join(vendorDir, 'version.json'), path.join(targetDir, 'version.json'));
+for (const file of ['protocol.json', 'version.json', ...GAMEPLAY_FILES]) {
+    fs.copyFileSync(path.join(vendorDir, file), path.join(targetDir, file));
+}
 
 // 2. Register the protocol version (used by minecraft-data and
 // minecraft-protocol for version negotiation and dataVersion lookups).
@@ -89,8 +110,22 @@ if (!versions.includes(MINECRAFT_VERSION)) {
     writeJson(versionsFile, versions);
 }
 
-// 4. Point 26.3 at its own protocol/version, and reuse 26.1 gameplay data
-// (blocks, items, biomes, etc.) until minecraft-data publishes full 26.3 data.
+// 3b. 26.3 inserted CHANGE_DESTROY_DIRECTION at action id 1. Without this
+// feature, mineflayer sends old block_dig/use-item action ids and vanilla
+// logs destroy-position mismatches.
+const featuresFile = path.join(pcDataDir, 'common', 'features.json');
+const features = readJson(featuresFile);
+if (!features.some(feature => feature.name === PLAYER_ACTION_FEATURE)) {
+    features.push({
+        name: PLAYER_ACTION_FEATURE,
+        description: 'ServerboundPlayerActionPacket inserted CHANGE_DESTROY_DIRECTION at id 1, shifting later actions up by one',
+        versions: [MINECRAFT_VERSION, 'latest'],
+    });
+    writeJson(featuresFile, features);
+}
+
+// 4. Point 26.3 at its own protocol, version, and gameplay data. Biomes,
+// language, and other data that did not change can still come from 26.1.
 const dataPaths = readJson(dataPathsFile);
 const basePaths = dataPaths.pc?.['26.1'];
 if (!basePaths) {
@@ -101,10 +136,23 @@ dataPaths.pc[MINECRAFT_VERSION] = {
     protocol: `pc/${MINECRAFT_VERSION}`,
     version: `pc/${MINECRAFT_VERSION}`,
 };
+for (const key of GAMEPLAY_DATA_KEYS) {
+    dataPaths.pc[MINECRAFT_VERSION][key] = `pc/${MINECRAFT_VERSION}`;
+}
 writeJson(dataPathsFile, dataPaths);
 
-// 5. Add the 26.3 loader entry. Cloning the 26.1 block keeps every gameplay
-// data path, while protocol/version point at the vendored 26.3 files.
+// 5. Add or update the 26.3 loader entry. Cloning the 26.1 block keeps every
+// unchanged data path, while protocol, version, and gameplay point at 26.3.
+function pointTo263(block) {
+    let updated = block;
+    for (const file of GAMEPLAY_FILES) {
+        updated = updated.replaceAll(`/26.1/${file}`, `/${MINECRAFT_VERSION}/${file}`);
+    }
+    return updated
+        .replaceAll('/26.1/protocol.json', `/${MINECRAFT_VERSION}/protocol.json`)
+        .replaceAll('/26.1/version.json', `/${MINECRAFT_VERSION}/version.json`);
+}
+
 let dataJs = fs.readFileSync(dataJsFile, 'utf8').replace(/\r\n/g, '\n');
 if (!dataJs.includes(`'${MINECRAFT_VERSION}': {`)) {
     const marker = "\n    '26.1': {";
@@ -127,13 +175,19 @@ if (!dataJs.includes(`'${MINECRAFT_VERSION}': {`)) {
     if (!hadComma) {
         before += ',';
     }
-    block = block
-        .replace(`'26.1': {`, `'${MINECRAFT_VERSION}': {`)
-        .replaceAll('/26.1/protocol.json', `/${MINECRAFT_VERSION}/protocol.json`)
-        .replaceAll('/26.1/version.json', `/${MINECRAFT_VERSION}/version.json`);
+    block = pointTo263(block.replace(`'26.1': {`, `'${MINECRAFT_VERSION}': {`));
     dataJs = `${before}\n${block}${dataJs.slice(insertAt)}`;
-    fs.writeFileSync(dataJsFile, dataJs);
+} else {
+    // Repair installations made before full 26.3 gameplay data was vendored.
+    const entryStart = dataJs.indexOf(`    '${MINECRAFT_VERSION}': {`);
+    const entryEnd = dataJs.indexOf('\n    }', entryStart);
+    if (entryStart < 0 || entryEnd < 0) {
+        fail('could not locate the existing 26.3 entry in minecraft-data/data.js.');
+    }
+    const entry = pointTo263(dataJs.slice(entryStart, entryEnd));
+    dataJs = dataJs.slice(0, entryStart) + entry + dataJs.slice(entryEnd);
 }
+fs.writeFileSync(dataJsFile, dataJs);
 
 // 6. Verify the result the same way the bot will load it at runtime.
 const minecraftData = require('minecraft-data');
@@ -144,8 +198,17 @@ if (!data?.version || data.version.version !== PROTOCOL_VERSION) {
 if (!data.protocol?.login?.toClient?.types?.packet_success) {
     fail(`minecraft-data ${MINECRAFT_VERSION} is missing the login protocol.`);
 }
-if (!data.blocks || Object.keys(data.blocks).length === 0) {
-    fail(`minecraft-data ${MINECRAFT_VERSION} is missing gameplay data.`);
+if (!data.blocks || Object.keys(data.blocks).length < 1200) {
+    fail(`minecraft-data ${MINECRAFT_VERSION} is missing 26.3 block data.`);
+}
+if (!data.items || Object.keys(data.items).length < 1600) {
+    fail(`minecraft-data ${MINECRAFT_VERSION} is missing 26.3 item data.`);
+}
+if (data.blocksByStateId?.[data.blocksByName?.oak_log?.defaultState]?.name !== 'oak_log') {
+    fail(`minecraft-data ${MINECRAFT_VERSION} has an invalid oak_log block-state mapping.`);
+}
+if (data.itemsByName?.oak_log?.id === undefined) {
+    fail(`minecraft-data ${MINECRAFT_VERSION} is missing the 26.3 oak_log item.`);
 }
 
-console.log(`[minecraft 26.3 install] native ${MINECRAFT_VERSION} data ready (protocol ${PROTOCOL_VERSION}, ${Object.keys(data.blocks).length} blocks).`);
+console.log(`[minecraft 26.3 install] native ${MINECRAFT_VERSION} data ready (protocol ${PROTOCOL_VERSION}, ${Object.keys(data.blocks).length} blocks, ${Object.keys(data.items).length} items).`);

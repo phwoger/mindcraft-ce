@@ -195,9 +195,12 @@ export const actionsList = [
     {
         name: '!consume',
         description: 'Eat/drink the given item.',
-        params: {'item_name': { type: 'ItemName', description: 'The name of the item to consume.' }},
-        perform: runAsAction(async (agent, item_name) => {
-            await skills.consume(agent.bot, item_name);
+        params: {
+            'item_name': { type: 'ItemName', description: 'The name of the item to consume.' },
+            'num': { type: 'int', description: 'The number of items to consume. Defaults to 1.', domain: [1, Number.MAX_SAFE_INTEGER], optional: true }
+        },
+        perform: runAsAction(async (agent, item_name, num) => {
+            await skills.consume(agent.bot, item_name, num);
         })
     },
     {

@@ -109,9 +109,11 @@ export function parseCommandMessage(message) {
 
     const params = commandParams(command);
     const paramNames = commandParamNames(command);
-    
-    if (args.length !== params.length)
-        return `Command ${command.name} was given ${args.length} args, but requires ${params.length} args.`;
+    const min = params.filter(param => !param.optional).length;
+    const max = params.length;
+
+    if (args.length < min || args.length > max)
+        return `Command ${command.name} was given ${args.length} args, but requires ${min === max ? min : `${min}-${max}`} args.`;
 
     
     for (let i = 0; i < args.length; i++) {
@@ -205,7 +207,11 @@ function commandParamNames(command) {
     return Object.keys(command.params);
 }
 
-function numParams(command) {
+function minParams(command) {
+    return commandParams(command).filter(param => !param.optional).length;
+}
+
+function maxParams(command) {
     return commandParams(command).length;
 }
 
@@ -220,8 +226,10 @@ export async function executeCommand(agent, message) {
         if (parsed.args) {
             numArgs = parsed.args.length;
         }
-        if (numArgs !== numParams(command))
-            return `Command ${command.name} was given ${numArgs} args, but requires ${numParams(command)} args.`;
+        const min = minParams(command);
+        const max = maxParams(command);
+        if (numArgs < min || numArgs > max)
+            return `Command ${command.name} was given ${numArgs} args, but requires ${min === max ? min : `${min}-${max}`} args.`;
         else {
             const result = await command.perform(agent, ...parsed.args);
             return result;
@@ -251,7 +259,8 @@ export function getCommandDocs(agent) {
         if (command.params) {
             docs += 'Params:\n';
             for (let param in command.params) {
-                docs += `${param}: (${typeTranslations[command.params[param].type]??command.params[param].type}) ${command.params[param].description}\n`;
+                const optional = command.params[param].optional ? ' (optional)' : '';
+                docs += `${param}: (${typeTranslations[command.params[param].type]??command.params[param].type})${optional} ${command.params[param].description}\n`;
             }
         }
     }
