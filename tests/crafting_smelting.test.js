@@ -4,12 +4,14 @@ import Vec3 from 'vec3';
 
 import { craftRecipe, smeltItem } from '../src/agent/library/skills.js';
 import { getCommand } from '../src/agent/commands/index.js';
-import { getItemId, initializeMcData } from '../src/utils/mcdata.js';
+import { getBlockId, getItemId, initializeMcData } from '../src/utils/mcdata.js';
 
-initializeMcData('26.3');
+const registry = initializeMcData('26.3');
 
 const PLANKS = getItemId('oak_planks');
 const LOG = getItemId('oak_log');
+const CHEST = getItemId('chest');
+const CRAFTING_TABLE = getBlockId('crafting_table');
 const RAW_IRON = getItemId('raw_iron');
 const IRON_INGOT = getItemId('iron_ingot');
 const COAL = getItemId('coal');
@@ -22,6 +24,7 @@ function makeInventory(entries) {
         inventory: {
             slots,
             items: () => slots.filter(Boolean),
+            findInventoryItem: name => find(name) || null,
         },
         entity: { position: new Vec3(0, 0, 0) },
     };
@@ -62,6 +65,78 @@ function makeCrafter(entries) {
     };
     bot.armorManager = { equipAll() {} };
     return { bot, craftCalls, counts: inventory.counts };
+}
+
+function makeTableCrafter(entries) {
+    const inventory = makeInventory(entries);
+    const { bot } = inventory;
+    const recipe = {
+        inShape: [
+            [{ id: PLANKS, count: 1 }, { id: PLANKS, count: 1 }, { id: PLANKS, count: 1 }],
+            [{ id: PLANKS, count: 1 }, { id: -1, count: 1 }, { id: PLANKS, count: 1 }],
+            [{ id: PLANKS, count: 1 }, { id: PLANKS, count: 1 }, { id: PLANKS, count: 1 }],
+        ],
+        result: { id: CHEST, count: 1 },
+    };
+    const craftCalls = [];
+    bot.recipesFor = (itemId, _metadata, _min, table) => {
+        if (itemId !== CHEST || !table) return [];
+        if (!inventory.slots.some(slot => slot?.name === 'oak_planks' && slot.count >= 8)) return [];
+        return [recipe];
+    };
+    bot.craft = async (_recipe, count, table) => {
+        craftCalls.push({ count, table });
+        inventory.remove('oak_planks', count * 8);
+        inventory.add('chest', count);
+    };
+    bot.armorManager = { equipAll() {} };
+    bot.equip = async () => {};
+    bot.lookAt = async () => {};
+    bot.modes = { isOn: () => false, pause() {} };
+    bot.game = { gameMode: 'survival' };
+    bot.registry = registry;
+    bot.version = '26.3';
+    bot.tool = { equipForBlock: async () => {} };
+
+    const key = position => `${Math.floor(position.x)},${Math.floor(position.y)},${Math.floor(position.z)}`;
+    const air = position => ({ name: 'air', type: getBlockId('air'), position: new Vec3(position.x, position.y, position.z), shapes: [], drops: [], diggable: false });
+    const table = position => ({ name: 'crafting_table', type: CRAFTING_TABLE, position: new Vec3(position.x, position.y, position.z), shapes: [], drops: [], diggable: true, canHarvest: () => true });
+    const blocks = new Map();
+    const airPosition = new Vec3(2, 0, 0);
+    const supportPosition = new Vec3(2, -1, 0);
+    blocks.set(key(airPosition), air(airPosition));
+    blocks.set(key(supportPosition), { name: 'stone', type: getBlockId('stone'), position: supportPosition, shapes: [], drops: [CRAFTING_TABLE], diggable: true });
+    bot.blockAt = position => blocks.get(key(position)) || air(position);
+    bot.findBlocks = ({ matching, count = 1000 }) => {
+        const matches = block => typeof matching === 'function' ? matching(block) :
+            Array.isArray(matching) ? matching.includes(block.type) : block.type === matching;
+        return [...blocks.values()].filter(matches).slice(0, count).map(block => block.position);
+    };
+
+    let placed = 0;
+    let collected = 0;
+    bot.placeBlock = async (buildOffBlock, face) => {
+        const position = buildOffBlock.position.offset(face.x, face.y, face.z);
+        blocks.set(key(position), table(position));
+        inventory.remove('crafting_table', 1);
+        placed++;
+    };
+    bot.collectBlock = {
+        async collect(block) {
+            if (blocks.get(key(block.position))?.name !== 'crafting_table')
+                throw new Error('no placed crafting table to collect');
+            blocks.delete(key(block.position));
+            inventory.add('crafting_table', 1);
+            collected++;
+        },
+    };
+
+    return {
+        bot, craftCalls, counts: inventory.counts,
+        tableCount: () => [...blocks.values()].filter(block => block.name === 'crafting_table').length,
+        placedCount: () => placed,
+        collectedCount: () => collected,
+    };
 }
 
 function makeFurnaceBot(entries) {
@@ -127,6 +202,48 @@ test('crafting rejects missing materials', async t => {
     assert.equal(await craftRecipe(bot, 'oak_planks', 1), false);
     assert.deepEqual(craftCalls, []);
     assert.deepEqual(counts(), {});
+});
+
+test('a table recipe places a table, crafts, and restores the table', async t => {
+    t.mock.method(console, 'log', () => {});
+    const { bot, craftCalls, counts, tableCount, placedCount, collectedCount } = makeTableCrafter([
+        ['oak_planks', 8],
+        ['crafting_table', 1],
+    ]);
+
+    assert.equal(await craftRecipe(bot, 'chest', 1), true);
+    assert.equal(craftCalls.length, 1);
+    assert.equal(craftCalls[0].count, 1);
+    assert.equal(craftCalls[0].table.name, 'crafting_table');
+    assert.deepEqual(counts(), { crafting_table: 1, chest: 1 });
+    assert.equal(placedCount(), 1);
+    assert.equal(collectedCount(), 1);
+    assert.equal(tableCount(), 0);
+});
+
+test('a table recipe without a table is rejected', async t => {
+    t.mock.method(console, 'log', () => {});
+    const { bot, craftCalls, counts, tableCount } = makeTableCrafter([['oak_planks', 8]]);
+
+    assert.equal(await craftRecipe(bot, 'chest', 1), false);
+    assert.deepEqual(craftCalls, []);
+    assert.deepEqual(counts(), { oak_planks: 8 });
+    assert.equal(tableCount(), 0);
+});
+
+test('an insufficient table recipe rejects and removes the placed table', async t => {
+    t.mock.method(console, 'log', () => {});
+    const { bot, craftCalls, counts, tableCount, placedCount, collectedCount } = makeTableCrafter([
+        ['oak_planks', 8],
+        ['crafting_table', 1],
+    ]);
+
+    assert.equal(await craftRecipe(bot, 'chest', 2), false);
+    assert.deepEqual(craftCalls, []);
+    assert.deepEqual(counts(), { oak_planks: 8, crafting_table: 1 });
+    assert.equal(placedCount(), 1);
+    assert.equal(collectedCount(), 1);
+    assert.equal(tableCount(), 0);
 });
 
 test('smelting chooses coal, consumes input, and yields an ingot', async t => {
