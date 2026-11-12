@@ -1368,9 +1368,11 @@ export async function followPlayer(bot, username, distance=4) {
      * @example
      * await skills.followPlayer(bot, "player");
      **/
-    let player = bot.players[username].entity
-    if (!player)
+    let player = bot.players[username]?.entity;
+    if (!player) {
+        log(bot, `Could not find ${username}.`);
         return false;
+    }
 
     const move = new pf.Movements(bot);
     move.digCost = 10;
