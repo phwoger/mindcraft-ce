@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import Vec3 from 'vec3';
 
-import { craftRecipe, smeltItem } from '../src/agent/library/skills.js';
+import { collectBlock, craftRecipe, smeltItem } from '../src/agent/library/skills.js';
 import { getCommand } from '../src/agent/commands/index.js';
 import { getBlockId, getItemId, initializeMcData } from '../src/utils/mcdata.js';
 
@@ -137,6 +137,41 @@ function makeTableCrafter(entries, { noFreeSpace = false, placementFails = false
         tableCount: () => [...blocks.values()].filter(block => block.name === 'crafting_table').length,
         placedCount: () => placed,
         collectedCount: () => collected,
+    };
+}
+
+function makeCollector(entries, { count = 1, failure = false } = {}) {
+    const inventory = makeInventory(entries);
+    const { bot } = inventory;
+    const key = position => `${Math.floor(position.x)},${Math.floor(position.y)},${Math.floor(position.z)}`;
+    const blocks = new Map();
+    for (let i = 0; i < count; i++) {
+        const position = new Vec3(i + 1, 0, 0);
+        blocks.set(key(position), {
+            name: 'oak_log', type: getBlockId('oak_log'), position,
+            drops: [LOG], diggable: true, canHarvest: () => true,
+        });
+    }
+    const collectCalls = [];
+    bot.entity = { position: new Vec3(0, 0, 0) };
+    bot.heldItem = null;
+    bot.modes = { isOn: () => false };
+    bot.registry = registry;
+    bot.version = '26.3';
+    bot.tool = { equipForBlock: async () => {} };
+    bot.blockAt = position => blocks.get(key(position)) || null;
+    bot.findBlocks = () => [...blocks.values()].map(block => block.position);
+    bot.collectBlock = {
+        async collect(block) {
+            collectCalls.push(block.name);
+            if (failure) throw new Error('drop was not picked up');
+            blocks.delete(key(block.position));
+            inventory.add('oak_log', 1);
+        },
+    };
+    return {
+        bot, collectCalls, counts: inventory.counts,
+        blockCount: () => blocks.size,
     };
 }
 
@@ -275,6 +310,28 @@ test('an insufficient table recipe rejects and removes the placed table', async 
     assert.equal(placedCount(), 1);
     assert.equal(collectedCount(), 1);
     assert.equal(tableCount(), 0);
+});
+
+test('collectBlock removes blocks and picks up their drops', async t => {
+    t.mock.method(console, 'log', () => {});
+    const { bot, collectCalls, counts, blockCount } = makeCollector([], { count: 2 });
+
+    assert.equal(await collectBlock(bot, 'oak_log', 2), true);
+    assert.deepEqual(collectCalls, ['oak_log', 'oak_log']);
+    assert.deepEqual(counts(), { oak_log: 2 });
+    assert.equal(blockCount(), 0);
+    assert.match(bot.output, /Collected 2 oak_log\./);
+});
+
+test('collectBlock rejects when the drop cannot be collected', async t => {
+    t.mock.method(console, 'log', () => {});
+    const { bot, collectCalls, counts, blockCount } = makeCollector([], { failure: true });
+
+    assert.equal(await collectBlock(bot, 'oak_log', 1), false);
+    assert.deepEqual(collectCalls, ['oak_log']);
+    assert.deepEqual(counts(), {});
+    assert.equal(blockCount(), 1);
+    assert.match(bot.output, /Collected 0 oak_log\./);
 });
 
 test('smelting chooses coal, consumes input, and yields an ingot', async t => {
