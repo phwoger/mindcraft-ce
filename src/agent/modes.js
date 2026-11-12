@@ -308,10 +308,17 @@ async function execute(mode, agent, func, timeout=-1) {
         agent.self_prompter.stopLoop();
     let interrupted_action = agent.actions.currentActionLabel;
     mode.active = true;
-    let code_return = await agent.actions.runAction(`mode:${mode.name}`, async () => {
-        await func();
-    }, { timeout });
-    mode.active = false;
+    let code_return;
+    try {
+        code_return = await agent.actions.runAction(`mode:${mode.name}`, async () => {
+            await func();
+        }, { timeout });
+    } catch (error) {
+        console.error(`Mode ${mode.name} failed:`, error);
+        return;
+    } finally {
+        mode.active = false;
+    }
     console.log(`Mode ${mode.name} finished executing, code_return: ${code_return.message}`);
 
     let should_reprompt = 
