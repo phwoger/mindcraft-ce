@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Vec3 from 'vec3';
-import mcData from 'minecraft-data';
+import { initializeMcData } from '../src/utils/mcdata.js';
 
 import { defendSelf } from '../src/agent/library/skills.js';
 import { initModes } from '../src/agent/modes.js';
@@ -80,19 +80,33 @@ test('defendSelf stops cleanly when interrupted', async () => {
     assert.doesNotMatch(bot.output, /Successfully defended self\./);
 });
 
-const registry = mcData('1.21.8');
+const registry = initializeMcData('1.21.8');
 
-function makeModeAgent(runAction, enemies = []) {
+function makeModeAgent(runAction, enemies = [], activeMode = 'self_defense', botOverrides = {}) {
     const bot = {
         entity: { position: new Vec3(0, 0, 0) },
         entities: Object.fromEntries(enemies.map((enemy, index) => [index, enemy])),
         registry,
+        inventory: {
+            items: () => [],
+            findInventoryItem: () => null,
+            emptySlotCount: () => 0,
+        },
+        blockAt: () => ({ name: 'air' }),
+        findBlocks: () => [],
+        clearControlStates: () => {},
+        setControlState: () => {},
+        targetDigBlock: null,
+        lastDamageTime: 0,
+        lastDamageTaken: 0,
+        health: 20,
         nearestEntity(predicate) {
             return enemies.find(enemy => predicate(enemy)) || null;
         },
         pathfinder: {
             getPathTo: async () => ({ status: 'success' }),
         },
+        ...botOverrides,
     };
     const agent = {
         bot,
@@ -114,7 +128,7 @@ function makeModeAgent(runAction, enemies = []) {
     for (const name of Object.keys(modes.getJson())) {
         modes.setOn(name, false);
     }
-    modes.setOn('self_defense', true);
+    modes.setOn(activeMode, true);
     return agent;
 }
 
@@ -226,10 +240,9 @@ test('self_defense clears active and resumes after a rejected defense task', asy
             return new Promise(resolve => { secondResolve = resolve; });
         }, [makeModeEnemy()]);
 
-        await agent.bot.modes.update();
-        await settle();
-        await agent.bot.modes.update();
-
+        await updateMode(agent);
+        assert.equal(attempts, 1);
+        await updateMode(agent);
         assert.equal(attempts, 2);
         assert.equal(unhandled.length, 0);
 
@@ -238,4 +251,167 @@ test('self_defense clears active and resumes after a rejected defense task', asy
     } finally {
         process.off('unhandledRejection', onUnhandled);
     }
+});
+
+function makeModeAnimal() {
+    return { name: 'cow', type: 'animal', metadata: {}, position: new Vec3(2, 0, 0) };
+}
+
+function makeModePlayer() {
+    return { name: 'Tester', type: 'player', metadata: {}, position: new Vec3(0.2, 0, 0) };
+}
+
+function makeModeItem(x) {
+    return { name: 'item', type: 'object', metadata: {}, position: new Vec3(x, 0, 0) };
+}
+
+function makeRejectingTask(modeName) {
+    let starts = 0;
+    return {
+        get starts() {
+            return starts;
+        },
+        runAction() {
+            starts++;
+            return Promise.reject(new Error(`${modeName} task failed`));
+        },
+    };
+}
+
+async function updateMode(agent) {
+    await agent.bot.modes.update();
+    await settle();
+}
+
+test('self_defense recovers after two consecutive rejected tasks', async () => {
+    let attempts = 0;
+    let agent;
+    agent = makeModeAgent(() => {
+        attempts++;
+        agent.bot.modes.pause('self_defense');
+        if (attempts <= 2) {
+            return Promise.reject(new Error('defense exploded'));
+        }
+        return Promise.resolve({ success: true, message: 'done', interrupted: false });
+    }, [makeModeEnemy()]);
+
+    await updateMode(agent);
+    assert.equal(attempts, 1);
+    await updateMode(agent);
+    assert.equal(attempts, 2);
+    await updateMode(agent);
+    assert.equal(attempts, 3);
+});
+
+test('self_preservation returns to idle and resumable after a rejected task', async () => {
+    const task = makeRejectingTask('self_preservation');
+    const agent = makeModeAgent(task.runAction, [], 'self_preservation', {
+        blockAt: () => ({ name: 'fire' }),
+    });
+
+    await updateMode(agent);
+    assert.equal(task.starts, 1);
+    await updateMode(agent);
+    assert.equal(task.starts, 2);
+});
+
+test('unstuck returns to idle and resumable after a rejected task', async () => {
+    const realNow = Date.now;
+    let now = realNow() + 100000;
+    Date.now = () => now;
+    try {
+        const task = makeRejectingTask('unstuck');
+        const agent = makeModeAgent(task.runAction, [], 'unstuck');
+        agent.isIdle = () => false;
+
+        await updateMode(agent);
+        now += 21000;
+        await updateMode(agent);
+        assert.equal(task.starts, 1);
+        now += 21000;
+        await updateMode(agent);
+        assert.equal(task.starts, 2);
+    } finally {
+        Date.now = realNow;
+    }
+});
+
+test('cowardice returns to idle and resumable after a rejected task', async () => {
+    const task = makeRejectingTask('cowardice');
+    const agent = makeModeAgent(task.runAction, [makeModeEnemy()], 'cowardice');
+
+    await updateMode(agent);
+    assert.equal(task.starts, 1);
+    await updateMode(agent);
+    assert.equal(task.starts, 2);
+});
+
+test('hunting returns to idle and resumable after a rejected task', async () => {
+    const task = makeRejectingTask('hunting');
+    const agent = makeModeAgent(task.runAction, [makeModeAnimal()], 'hunting');
+
+    await updateMode(agent);
+    assert.equal(task.starts, 1);
+    await updateMode(agent);
+    assert.equal(task.starts, 2);
+});
+
+test('item_collecting returns to idle and resumable after a rejected task', async () => {
+    const realNow = Date.now;
+    let now = realNow() + 100000;
+    Date.now = () => now;
+    try {
+        const task = makeRejectingTask('item_collecting');
+        const items = [makeModeItem(2)];
+        const agent = makeModeAgent(task.runAction, items, 'item_collecting', {
+            inventory: { items: () => [], findInventoryItem: () => null, emptySlotCount: () => 2 },
+        });
+
+        await updateMode(agent);
+        now += 2100;
+        await updateMode(agent);
+        assert.equal(task.starts, 1);
+
+        items[0] = makeModeItem(2.2);
+        await updateMode(agent);
+        now += 2100;
+        await updateMode(agent);
+        assert.equal(task.starts, 2);
+    } finally {
+        Date.now = realNow;
+    }
+});
+
+test('torch_placing returns to idle and resumable after a rejected task', async () => {
+    const realNow = Date.now;
+    let now = realNow() + 100000;
+    Date.now = () => now;
+    try {
+        const task = makeRejectingTask('torch_placing');
+        const agent = makeModeAgent(task.runAction, [], 'torch_placing', {
+            inventory: {
+                items: () => [],
+                findInventoryItem: () => ({ name: 'torch' }),
+                emptySlotCount: () => 36,
+            },
+        });
+
+        await updateMode(agent);
+        assert.equal(task.starts, 1);
+        now += 6000;
+        await updateMode(agent);
+        assert.equal(task.starts, 2);
+    } finally {
+        Date.now = realNow;
+    }
+});
+
+test('elbow_room returns to idle and resumable after a rejected task', async () => {
+    const task = makeRejectingTask('elbow_room');
+    const agent = makeModeAgent(task.runAction, [makeModePlayer()], 'elbow_room');
+
+    await updateMode(agent);
+    assert.equal(task.starts, 1);
+    await updateMode(agent);
+    assert.equal(task.starts, 2);
 });
