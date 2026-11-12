@@ -67,7 +67,7 @@ function makeCrafter(entries) {
     return { bot, craftCalls, counts: inventory.counts };
 }
 
-function makeTableCrafter(entries) {
+function makeTableCrafter(entries, { noFreeSpace = false, placementFails = false } = {}) {
     const inventory = makeInventory(entries);
     const { bot } = inventory;
     const recipe = {
@@ -104,7 +104,7 @@ function makeTableCrafter(entries) {
     const blocks = new Map();
     const airPosition = new Vec3(2, 0, 0);
     const supportPosition = new Vec3(2, -1, 0);
-    blocks.set(key(airPosition), air(airPosition));
+    if (!noFreeSpace) blocks.set(key(airPosition), air(airPosition));
     blocks.set(key(supportPosition), { name: 'stone', type: getBlockId('stone'), position: supportPosition, shapes: [], drops: [CRAFTING_TABLE], diggable: true });
     bot.blockAt = position => blocks.get(key(position)) || air(position);
     bot.findBlocks = ({ matching, count = 1000 }) => {
@@ -116,6 +116,7 @@ function makeTableCrafter(entries) {
     let placed = 0;
     let collected = 0;
     bot.placeBlock = async (buildOffBlock, face) => {
+        if (placementFails) throw new Error('placement blocked');
         const position = buildOffBlock.position.offset(face.x, face.y, face.z);
         blocks.set(key(position), table(position));
         inventory.remove('crafting_table', 1);
@@ -218,6 +219,36 @@ test('a table recipe places a table, crafts, and restores the table', async t =>
     assert.deepEqual(counts(), { crafting_table: 1, chest: 1 });
     assert.equal(placedCount(), 1);
     assert.equal(collectedCount(), 1);
+    assert.equal(tableCount(), 0);
+});
+
+test('a table recipe with no free space rejects without losing materials', async t => {
+    t.mock.method(console, 'log', () => {});
+    const { bot, craftCalls, counts, tableCount, placedCount, collectedCount } = makeTableCrafter([
+        ['oak_planks', 8],
+        ['crafting_table', 1],
+    ], { noFreeSpace: true });
+
+    assert.equal(await craftRecipe(bot, 'chest', 1), false);
+    assert.deepEqual(craftCalls, []);
+    assert.deepEqual(counts(), { oak_planks: 8, crafting_table: 1 });
+    assert.equal(placedCount(), 0);
+    assert.equal(collectedCount(), 0);
+    assert.equal(tableCount(), 0);
+});
+
+test('a table placement failure rejects without crafting or losing the table', async t => {
+    t.mock.method(console, 'log', () => {});
+    const { bot, craftCalls, counts, tableCount, placedCount, collectedCount } = makeTableCrafter([
+        ['oak_planks', 8],
+        ['crafting_table', 1],
+    ], { placementFails: true });
+
+    assert.equal(await craftRecipe(bot, 'chest', 1), false);
+    assert.deepEqual(craftCalls, []);
+    assert.deepEqual(counts(), { oak_planks: 8, crafting_table: 1 });
+    assert.equal(placedCount(), 0);
+    assert.equal(collectedCount(), 0);
     assert.equal(tableCount(), 0);
 });
 
