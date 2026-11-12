@@ -43,6 +43,16 @@ test('defendSelf reports no enemies without attacking', async () => {
     assert.deepEqual(bot.modes.paused, ['self_defense', 'cowardice']);
 });
 
+test('defendSelf ignores a hostile outside its range', async () => {
+    const enemy = { name: 'zombie', position: new Vec3(10, 0, 0) };
+    const bot = makeDefenseBot([enemy]);
+    bot.nearestEntity = predicate => predicate(enemy) && bot.entity.position.distanceTo(enemy.position) < 8 ? enemy : null;
+
+    assert.equal(await defendSelf(bot, 8), false);
+    assert.equal(bot.pvp.attacks.length, 0);
+    assert.match(bot.output, /No enemies nearby to defend self from\./);
+});
+
 test('defendSelf attacks every hostile in range and reports success', async () => {
     const enemies = [
         { name: 'zombie', position: new Vec3(3, 0, 0) },
