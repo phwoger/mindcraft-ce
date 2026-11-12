@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import Vec3 from 'vec3';
 
-import { collectBlock, craftRecipe, smeltItem } from '../src/agent/library/skills.js';
+import { collectBlock, craftRecipe, goToPosition, smeltItem } from '../src/agent/library/skills.js';
 import { getCommand } from '../src/agent/commands/index.js';
 import { getBlockId, getItemId, initializeMcData } from '../src/utils/mcdata.js';
 
@@ -175,6 +175,30 @@ function makeCollector(entries, { count = 1, failure = false } = {}) {
     };
 }
 
+function makeMover({ mode = 'success' } = {}) {
+    const { bot } = makeInventory([]);
+    bot.entity = { position: new Vec3(0, 0, 0) };
+    bot.heldItem = null;
+    bot.modes = { isOn: () => false };
+    bot.registry = registry;
+    bot.version = '26.3';
+    bot.targetDigBlock = null;
+    bot.stopDigging = () => {};
+    const pathCalls = [];
+    bot.pathfinder = {
+        getPathTo: async () => ({ status: 'success' }),
+        setMovements: () => {},
+        stop: () => {},
+        goto: async goal => {
+            pathCalls.push({ x: goal.x, y: goal.y, z: goal.z });
+            if (mode === 'throw') throw new Error('No path to the goal!');
+            if (mode === 'silent') return true;
+            bot.entity.position = new Vec3(goal.x, goal.y, goal.z);
+        },
+    };
+    return { bot, pathCalls };
+}
+
 function makeFurnaceBot(entries) {
     const inventory = makeInventory(entries);
     const { bot } = inventory;
@@ -332,6 +356,32 @@ test('collectBlock rejects when the drop cannot be collected', async t => {
     assert.deepEqual(counts(), {});
     assert.equal(blockCount(), 1);
     assert.match(bot.output, /Collected 0 oak_log\./);
+});
+
+test('goToPosition moves to a reachable target and verifies arrival', async t => {
+    t.mock.method(console, 'log', () => {});
+    const { bot, pathCalls } = makeMover();
+
+    assert.equal(await goToPosition(bot, 5, 0, 0, 1), true);
+    assert.deepEqual(pathCalls, [{ x: 5, y: 0, z: 0 }]);
+    assert.equal(bot.entity.position.x, 5);
+    assert.match(bot.output, /You have reached at 5, 0, 0\./);
+});
+
+test('goToPosition reports a pathfinding failure without throwing', async t => {
+    t.mock.method(console, 'log', () => {});
+    const { bot } = makeMover({ mode: 'throw' });
+
+    assert.equal(await goToPosition(bot, 5, 0, 0, 1), false);
+    assert.match(bot.output, /Pathfinding stopped: No path to the goal!\./);
+});
+
+test('goToPosition rejects a silent no-op instead of reporting success', async t => {
+    t.mock.method(console, 'log', () => {});
+    const { bot } = makeMover({ mode: 'silent' });
+
+    assert.equal(await goToPosition(bot, 5, 0, 0, 1), false);
+    assert.match(bot.output, /Unable to reach 5, 0, 0/);
 });
 
 test('smelting chooses coal, consumes input, and yields an ingot', async t => {
