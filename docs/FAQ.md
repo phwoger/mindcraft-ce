@@ -10,6 +10,10 @@ hide:
   - your LAN port is incorrect, make sure the one you enter in game is the same as specified in `settings.js`
   - you have the wrong version of minecraft, make sure your MC version is the same as specified in `settings.js`
 
+- `Unsupported Minecraft version "26.3"` or a 26.3 protocol error: 26.3 support is installed by `npm install`; the postinstall step injects the 26.3 protocol data and applies the pinned mineflayer/minecraft-protocol patches. Run `npm run reinstall` to rebuild the locked dependency tree, keep `minecraft_version` at `"26.3"`, and start the app again. ViaProxy is only needed for versions newer than 26.3.
+
+- Kicked with `multiplayer.disconnect.invalid_player_movement` on a 26.3 server: the installed mineflayer is missing the 26.3 `client_tick_end` and resolved-teleport fixes. Run `npm run reinstall` so the pinned 26.3 branch and patches are installed.
+
 - `ERR_MODULE_NOT_FOUND`: You are missing an npm package. Run `npm install`.
 
 - Many issues are caused by out-of-date node modules or patches, especially after updates. Run `npm run reinstall` to clean `node_modules` and reinstall the locked dependency tree.

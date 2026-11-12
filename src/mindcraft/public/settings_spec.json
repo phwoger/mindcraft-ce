@@ -6,8 +6,8 @@
     },
     "minecraft_version": {
         "type": "string",
-        "description": "The version of Minecraft to use. Set to 'auto' to automatically detect the version.",
-        "default": "auto"
+        "description": "The version of Minecraft to use. Set to 'auto' to automatically detect the version. Minecraft 26.3 is supported natively and needs no proxy.",
+        "default": "26.3"
     },
     "host": {
         "type": "string",

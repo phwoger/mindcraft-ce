@@ -54,7 +54,7 @@ function enableFabricRegistrySync(bot) {
  * @typedef {string} BlockName
 */
 
-export const WOOD_TYPES = ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry'];
+export const WOOD_TYPES = ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'poplar'];
 export const MATCHING_WOOD_BLOCKS = [
     'log',
     'planks',
@@ -115,6 +115,12 @@ export function initBot(username) {
     const POSITION_THROTTLE_MS = 50;
     const originalWrite = bot._client.write.bind(bot._client);
     bot._client.write = function(name, data) {
+        // 26.3 requires one position-bearing packet per client tick, closed by
+        // mineflayer's tick_end. Delaying positions independently breaks that
+        // pairing, so leave 26.3 movement on mineflayer's tick schedule.
+        if (String(bot.version).startsWith('26.3')) {
+            return originalWrite(name, data);
+        }
         if (name === 'position' || name === 'position_look' || name === 'look') {
             const now = Date.now();
             if (now - lastPositionUpdate < POSITION_THROTTLE_MS) {
@@ -193,7 +199,7 @@ export function mustCollectManually(blockName) {
     const full_names = ['wheat', 'carrots', 'potatoes', 'beetroots', 'nether_wart', 'cocoa', 'sugar_cane', 'kelp', 'short_grass', 'fern', 'tall_grass', 'bamboo',
         'poppy', 'dandelion', 'blue_orchid', 'allium', 'azure_bluet', 'oxeye_daisy', 'cornflower', 'lilac', 'wither_rose', 'lily_of_the_valley', 'wither_rose',
         'lever', 'redstone_wire', 'lantern']
-    const partial_names = ['sapling', 'torch', 'button', 'carpet', 'pressure_plate', 'mushroom', 'tulip', 'bush', 'vines', 'fern']
+    const partial_names = ['sapling', 'torch', 'button', 'carpet', 'pressure_plate', 'mushroom', 'tulip', 'bush', 'shrub', 'vines', 'fern']
     return full_names.includes(blockName.toLowerCase()) || partial_names.some(partial => blockName.toLowerCase().includes(partial));
 }
 
@@ -449,9 +455,14 @@ export function calculateLimitingResource(availableItems, requiredItems, discret
     let limitingResource = null;
     let num = Infinity;
     for (const itemType in requiredItems) {
-        if (availableItems[itemType] < requiredItems[itemType] * num) {
+        const required = requiredItems[itemType];
+        if (required <= 0) continue;
+        // A missing inventory entry means zero available items, not "skip".
+        const available = availableItems[itemType] ?? 0;
+        const possible = available / required;
+        if (possible < num) {
             limitingResource = itemType;
-            num = availableItems[itemType] / requiredItems[itemType];
+            num = possible;
         }
     }
     if(discrete) num = Math.floor(num);

@@ -74,9 +74,12 @@ The former experimental RAG implementation has been removed from the agent-syste
 # Getting Started
 ## Requirements
 
-- [Minecraft Java Edition](https://www.minecraft.net/en-us/store/minecraft-java-bedrock-edition-pc) (up to and including v1.21.11)
+- [Minecraft Java Edition](https://www.minecraft.net/en-us/store/minecraft-java-bedrock-edition-pc) (up to and including v26.3)
 - [Node.js Installed](https://nodejs.org/) (use Node 22, v22.13 or newer)
 - An available model from a [supported provider](#model-customization). The default profile uses Andy API; local Ollama and LM Studio are also supported. Provider credentials are needed only when your chosen service requires them.
+
+> [!Note]
+> Minecraft Java 26.3 is the current target and is supported natively. `npm install` pins the 26.3-compatible mineflayer/minecraft-protocol branches, injects the 26.3 protocol data, and applies the required runtime patches. Keep the default `minecraft_version: "26.3"`; no proxy is needed. The optional [ViaProxy service](services/viaproxy/README.md) remains available for versions newer than the bundled client.
 
 > [!Important]
 > If installing node on windows, ensure you check `Automatically install the necessary tools`
@@ -93,7 +96,7 @@ The former experimental RAG implementation has been removed from the agent-syste
 
 4. In terminal/command prompt, run `npm install` from the installed directory
 
-5. Start a Minecraft Java server or open a world to LAN. Set `host`, `port` and `auth` in `settings.js` to match it; a LAN world's displayed port can change each time. The sample configuration uses `localhost:55916`.
+5. Start a Minecraft Java server or open a world to LAN. Set `host`, `port` and `auth` in `settings.js` to match it; a LAN world's displayed port can change each time. The sample configuration uses `localhost:55916` and `minecraft_version: "26.3"`, which connects directly to a 26.3 server. No proxy is required.
 
 6. Run `node main.js` from the installed directory
 
@@ -318,7 +321,7 @@ When running in docker, if you want the bot to join your local minecraft server,
 "host": "host.docker.internal", // instead of "localhost", to join your local minecraft from inside the docker container
 ```
 
-To connect to an unsupported minecraft version, you can try to use [viaproxy](services/viaproxy/README.md)
+Minecraft Java 26.3 connects directly with the bundled client; no proxy is required. If you need a server version newer than the bundled client, use the optional [ViaProxy service](services/viaproxy/README.md) and set `minecraft_version` to the bundled client version while the proxy is in use.
 
 # Bot Profiles
 

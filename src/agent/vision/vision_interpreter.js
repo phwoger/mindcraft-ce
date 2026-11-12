@@ -1,5 +1,4 @@
 import { Vec3 } from 'vec3';
-import { Camera } from "./camera.js";
 import fs from 'fs';
 
 export class VisionInterpreter {
@@ -7,8 +6,15 @@ export class VisionInterpreter {
         this.agent = agent;
         this.allow_vision = allow_vision;
         this.fp = './bots/'+agent.name+'/screenshots/';
+        this.camera = null;
+        this.cameraReady = null;
         if (allow_vision) {
-            this.camera = new Camera(agent.bot, this.fp);
+            // Headless rendering pulls in prismarine-viewer's native canvas/
+            // WebGL stack. Only load it when vision is actually enabled.
+            this.cameraReady = import('./camera.js').then(({ Camera }) => {
+                this.camera = new Camera(agent.bot, this.fp);
+                return this.camera;
+            });
         }
     }
 
@@ -16,6 +22,7 @@ export class VisionInterpreter {
         if (!this.allow_vision || !this.agent.prompter.vision_model.sendVisionRequest) {
             return "Vision is disabled. Use other methods to describe the environment.";
         }
+        await this.cameraReady;
         let result = "";
         const bot = this.agent.bot;
         const player = bot.players[player_name]?.entity;
@@ -42,6 +49,7 @@ export class VisionInterpreter {
         if (!this.allow_vision || !this.agent.prompter.vision_model.sendVisionRequest) {
             return "Vision is disabled. Use other methods to describe the environment.";
         }
+        await this.cameraReady;
         let result = "";
         const bot = this.agent.bot;
         await bot.lookAt(new Vec3(x, y + 2, z));

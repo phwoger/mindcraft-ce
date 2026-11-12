@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { createMindServer, registerAgent, numStateListeners } from './mindserver.js';
+import { createMindServer, registerAgent, logoutAgent, numStateListeners } from './mindserver.js';
 import { AgentProcess } from '../process/agent_process.js';
 import { getServer } from './mcserver.js';
 import open from 'open';
@@ -70,7 +70,6 @@ export async function createAgent(settings) {
     const agentIndex = agent_count++;
     const viewer_port = 3000 + agentIndex;
     const process_token = randomBytes(32).toString('hex');
-    registerAgent(settings, viewer_port, process_token);
     let load_memory = settings.load_memory || false;
     let init_message = settings.init_message || null;
 
@@ -82,17 +81,25 @@ export async function createAgent(settings) {
             settings.minecraft_version = server.version;
         } catch (error) {
             console.warn(`Error getting server:`, error);
+            if (error.code === 'UNSUPPORTED_MINECRAFT_VERSION') {
+                return {
+                    success: false,
+                    error: error.message
+                };
+            }
             if (settings.minecraft_version === "auto") {
                 settings.minecraft_version = null;
             }
             console.warn(`Attempting to connect anyway...`);
         }
 
+        registerAgent(settings, viewer_port, process_token);
         const agentProcess = new AgentProcess(agent_name, mindserver_port, process_token);
         agentProcess.start(load_memory, init_message, agentIndex);
         agent_processes[settings.profile.name] = agentProcess;
     } catch (error) {
         console.error(`Error creating agent ${agent_name}:`, error);
+        logoutAgent(agent_name);
         destroyAgent(agent_name);
         return {
             success: false,

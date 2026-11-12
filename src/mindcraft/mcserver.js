@@ -1,6 +1,21 @@
 import net from 'net';
 import { resolveSrv } from 'dns/promises';
 import mc from 'minecraft-protocol';
+import { compareMinecraftVersions, isMinecraftVersionSupported, newestMinecraftVersion } from '../utils/minecraft_version.js';
+
+function unsupportedVersionError(version, supportedVersions, serverDetails = null) {
+    const newest = newestMinecraftVersion(supportedVersions);
+    const isNewer = newest !== null && compareMinecraftVersions(version, newest) > 0;
+    const hint = isNewer
+        ? ` Minecraft ${version} is newer than the newest version supported by the bundled mineflayer (${newest}). Update the client dependencies, or connect through the optional ViaProxy service (services/viaproxy/README.md) and set minecraft_version to ${newest} while the proxy is in use.`
+        : '';
+    const prefix = serverDetails
+        ? `MC server was found ${serverDetails}, but its version is unsupported.`
+        : `Unsupported Minecraft version "${version}".`;
+    const error = new Error(`${prefix} Supported versions are: ${supportedVersions.join(', ')}.${hint}`);
+    error.code = 'UNSUPPORTED_MINECRAFT_VERSION';
+    return error;
+}
 
 /**
  * Pings a Minecraft server and returns its advertised metadata.
@@ -172,6 +187,12 @@ export async function findServers(ip, earlyExit = false, timeout = 100, options 
 export async function getServer(host, port, version) {
     let server = null;
 
+    // Fail before scanning/connecting when the configured client version is
+    // not supported at all (for example a 26.3 target without ViaProxy).
+    if (version && version !== 'auto' && !isMinecraftVersionSupported(version, mc.supportedVersions)) {
+        throw unsupportedVersionError(version, mc.supportedVersions);
+    }
+
     if (port == -1) {
         console.log(`No port provided. Searching for LAN server on host ${host}...`);
         const servers = await findServers(host, true);
@@ -195,12 +216,10 @@ export async function getServer(host, port, version) {
         throw new Error(`MC server was found ${serverString}, but its Minecraft version could not be determined.`);
     }
 
-    const isSupported = mc.supportedVersions.some(v =>
-        serverVersion === v || (serverVersion.startsWith(v) && serverVersion.charAt(v.length) === '.')
-    );
+    const isSupported = isMinecraftVersionSupported(serverVersion, mc.supportedVersions);
 
     if (!isSupported)
-        throw new Error(`MC server was found ${serverString}, but version is unsupported. Supported versions are: ${mc.supportedVersions.join(', ')}.`);
+        throw unsupportedVersionError(serverVersion, mc.supportedVersions, serverString);
     else if (version !== 'auto' && server.version !== version)
         throw new Error(`MC server was found ${serverString}, but version is incorrect. Expected ${version}, but found ${server.version}. Check the server version in settings.js.`);
     else
