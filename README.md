@@ -250,16 +250,19 @@ For Andy model downloads and model-specific setup, see the [Mindcraft CE Hugging
 
 ### Strata
 
-[Strata](https://strata.phwog.site/v1) is an OpenAI-compatible inference gateway. Use `strata/modelname`, or a model object with `"api": "strata"`, and set `STRATA_API_KEY` in `keys.json` or your environment when the endpoint requires a key. The hosted endpoint currently serves `iq3_s` (Qwen3.8-Flash-Next) through `/v1/chat/completions`; it is a thinking model that returns its chain of thought in `reasoning_content` and the reply in `content`. The adapter reads `content`, and if the model spends its entire token budget before answering it retries once with thinking disabled.
+[Strata](https://strata.phwog.site/v1) is an OpenAI-compatible inference gateway. Use `strata/modelname`, or a model object with `"api": "strata"`, and set `STRATA_API_KEY` in `keys.json` or your environment when the endpoint requires a key. The hosted endpoint currently serves `q2_0` (Qwen3.8-Flash-Next) through `/v1/chat/completions`; it is a thinking model that returns its chain of thought in `reasoning_content` and the reply in `content`. The adapter disables thinking by default (`chat_template_kwargs.enable_thinking: false`) so replies are not spent on chain of thought. To opt back in, set it in the profile params; if an opted-in model still exhausts its token budget before answering, the adapter retries once with thinking disabled.
 
 ```json
 "model": {
   "api": "strata",
-  "model": "iq3_s"
+  "model": "q2_0",
+  "params": {
+    "chat_template_kwargs": { "enable_thinking": false }
+  }
 }
 ```
 
-See the example profile [profiles/strata.json](profiles/strata.json). Images can be sent through the same chat endpoint, so `vision_model` can point at `strata` too. Strata does not serve embeddings, so set a separate `embedding` provider in the profile if you want embedding-based example selection instead of the word-overlap fallback.
+Thinking is already off unless a profile sets `enable_thinking` to `true`, so the `params` block above is optional and shown for clarity. See the example profile [profiles/strata.json](profiles/strata.json). Images can be sent through the same chat endpoint, so `vision_model` can point at `strata` too. Strata does not serve embeddings, so set a separate `embedding` provider in the profile if you want embedding-based example selection instead of the word-overlap fallback.
 
 ## Online Servers
 To connect to online servers your bot will need an official Microsoft/Minecraft account. You can use your own personal one, but will need another account if you want to connect too and play with it. To connect, change these lines in `settings.js`:

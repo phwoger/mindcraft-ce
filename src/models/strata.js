@@ -2,10 +2,12 @@ import { strictFormat } from '../utils/text.js';
 import { getKey, hasKey } from '../utils/keys.js';
 
 // Strata is an OpenAI-compatible inference gateway. It serves a single
-// thinking-capable model ("iq3_s", Qwen3.8-Flash-Next) which puts its chain of
-// thought in `reasoning_content` and the actual reply in `content`.
+// thinking-capable model ("q2_0", Qwen3.8-Flash-Next) which puts its chain of
+// thought in `reasoning_content` and the actual reply in `content`. Thinking is
+// disabled by default; opt back in with
+// `params.chat_template_kwargs.enable_thinking: true`.
 const DEFAULT_BASE_URL = 'https://strata.phwog.site/v1';
-const DEFAULT_MODEL = 'iq3_s';
+const DEFAULT_MODEL = 'q2_0';
 const MAX_ATTEMPTS = 4;
 
 export class Strata {
@@ -20,27 +22,19 @@ export class Strata {
     async sendRequest(turns, systemMessage, stop_seq = '***', options = {}) {
         const messages = [{ role: 'system', content: systemMessage }, ...strictFormat(turns)];
         const stop = Array.isArray(stop_seq) ? stop_seq : (stop_seq ? [stop_seq] : []);
+        const wantsThinking = this.params?.chat_template_kwargs?.enable_thinking === true;
         let disableThinking = false;
         let finalRes = null;
 
         for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             let data;
             try {
-                const body = {
-                    model: this.model_name,
+                const body = this.buildBody({
                     messages,
-                    stream: false,
-                    ...(this.params || {}),
-                    ...(options.body || {}),
-                };
-                if (stop.length > 0)
-                    body.stop = stop;
-                if (disableThinking) {
-                    body.chat_template_kwargs = {
-                        ...(body.chat_template_kwargs || {}),
-                        enable_thinking: false,
-                    };
-                }
+                    stop,
+                    enableThinking: wantsThinking && !disableThinking,
+                    extraBody: options.body,
+                });
                 console.log(`Awaiting strata api response... (model: ${this.model_name}, attempt: ${attempt})`);
                 data = await this.send(body);
             }
@@ -70,9 +64,10 @@ export class Strata {
                 break;
             }
 
-            // The model can spend its whole budget inside reasoning_content and
-            // return a null message. Ask again with thinking turned off so the
-            // caller still gets an answer instead of an empty one.
+            // A model with thinking explicitly enabled can spend its whole
+            // budget inside reasoning_content and return a null message. Ask
+            // again with thinking turned off so the caller still gets an
+            // answer instead of an empty one.
             if (!disableThinking) {
                 console.warn('Strata returned no message content, retrying with thinking disabled...');
                 disableThinking = true;
@@ -105,16 +100,10 @@ export class Strata {
             }
         ];
 
-        const data = await this.send({
-            model: this.model_name,
+        const data = await this.send(this.buildBody({
             messages: payload,
-            stream: false,
-            ...(this.params || {}),
-            chat_template_kwargs: {
-                ...(this.params?.chat_template_kwargs || {}),
-                enable_thinking: false,
-            },
-        });
+            enableThinking: false,
+        }));
 
         const text = this.extractText(data?.choices?.[0]?.message);
         if (!text) {
@@ -125,6 +114,24 @@ export class Strata {
 
     embed() {
         return Promise.reject(new Error('Embeddings are not supported by Strata. Set a separate embedding provider in the profile.'));
+    }
+
+    buildBody({ messages, stop = [], enableThinking = false, extraBody = {} }) {
+        const params = this.params || {};
+        const body = {
+            model: this.model_name,
+            messages,
+            stream: false,
+            ...params,
+            ...(extraBody || {}),
+        };
+        if (stop.length > 0)
+            body.stop = stop;
+        body.chat_template_kwargs = {
+            ...(params.chat_template_kwargs || {}),
+            enable_thinking: enableThinking,
+        };
+        return body;
     }
 
     extractText(message) {
