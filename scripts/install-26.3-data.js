@@ -211,4 +211,31 @@ if (data.itemsByName?.oak_log?.id === undefined) {
     fail(`minecraft-data ${MINECRAFT_VERSION} is missing the 26.3 oak_log item.`);
 }
 
+// 7. Give prismarine-viewer the render data it needs for 26.3. Its bundled
+// block states are keyed by block name, so the newest bundled version renders
+// 26.3 correctly. The patched viewer accepts 26.3 (see patches/).
+const VIEWER_ASSET_SOURCE_VERSION = '1.21.4';
+let viewerPublicDir;
+try {
+    viewerPublicDir = path.join(path.dirname(require.resolve('prismarine-viewer/package.json')), 'public');
+} catch {
+    // prismarine-viewer is optional; skip its assets when it is not installed.
+}
+if (viewerPublicDir) {
+    const viewerAssets = [
+        [path.join('blocksStates', `${VIEWER_ASSET_SOURCE_VERSION}.json`), path.join('blocksStates', `${MINECRAFT_VERSION}.json`)],
+        [path.join('textures', `${VIEWER_ASSET_SOURCE_VERSION}.png`), path.join('textures', `${MINECRAFT_VERSION}.png`)],
+        [path.join('textures', VIEWER_ASSET_SOURCE_VERSION, 'entity'), path.join('textures', MINECRAFT_VERSION, 'entity')],
+    ];
+    for (const [source, target] of viewerAssets) {
+        const sourcePath = path.join(viewerPublicDir, source);
+        const targetPath = path.join(viewerPublicDir, target);
+        if (!fs.existsSync(sourcePath) || fs.existsSync(targetPath)) {
+            continue;
+        }
+        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+        fs.cpSync(sourcePath, targetPath, { recursive: true });
+    }
+}
+
 console.log(`[minecraft 26.3 install] native ${MINECRAFT_VERSION} data ready (protocol ${PROTOCOL_VERSION}, ${Object.keys(data.blocks).length} blocks, ${Object.keys(data.items).length} items).`);
