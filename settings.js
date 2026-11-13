@@ -20,6 +20,7 @@ const settings = {
         // "./profiles/mistral.json",
         // "./profiles/deepseek.json",
         // "./profiles/mercury.json",
+        // "./profiles/strata.json",
         // "./profiles/andy-4.2.json",
 
         // using more than 1 profile requires you to /msg each bot indivually

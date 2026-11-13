@@ -218,6 +218,11 @@ You can configure the agent's name, model, and prompts in a profile such as `and
       <td><a href="https://www.inceptionlabs.ai/">docs</a></td>
     </tr>
     <tr>
+      <td><pre>strata</pre></td>
+      <td><pre>STRATA_API_KEY</pre> (optional)</td>
+      <td><a href="https://strata.phwog.site/v1/models">docs</a></td>
+    </tr>
+    <tr>
       <td><pre>lmstudio</pre></td>
       <td>n/a</td>
       <td><a href="https://www.lmstudio.ai/">docs</a></td>
@@ -242,6 +247,19 @@ server you connect to. See the example profiles for [local Ollama](profiles/olla
 and [Ollama Cloud](profiles/ollama_cloud.json).
 
 For Andy model downloads and model-specific setup, see the [Mindcraft CE Hugging Face collection](https://huggingface.co/collections/Mindcraft-CE). Use the exact model name installed in your chosen local server.
+
+### Strata
+
+[Strata](https://strata.phwog.site/v1) is an OpenAI-compatible inference gateway. Use `strata/modelname`, or a model object with `"api": "strata"`, and set `STRATA_API_KEY` in `keys.json` or your environment when the endpoint requires a key. The hosted endpoint currently serves `iq3_s` (Qwen3.8-Flash-Next) through `/v1/chat/completions`; it is a thinking model that returns its chain of thought in `reasoning_content` and the reply in `content`. The adapter reads `content`, and if the model spends its entire token budget before answering it retries once with thinking disabled.
+
+```json
+"model": {
+  "api": "strata",
+  "model": "iq3_s"
+}
+```
+
+See the example profile [profiles/strata.json](profiles/strata.json). Images can be sent through the same chat endpoint, so `vision_model` can point at `strata` too. Strata does not serve embeddings, so set a separate `embedding` provider in the profile if you want embedding-based example selection instead of the word-overlap fallback.
 
 ## Online Servers
 To connect to online servers your bot will need an official Microsoft/Minecraft account. You can use your own personal one, but will need another account if you want to connect too and play with it. To connect, change these lines in `settings.js`:
@@ -375,7 +393,7 @@ Embedding models are used to embed and efficiently select relevant examples for 
 
 Embedding adapters include `andy`, `openai`, `google`, `replicate`, `huggingface`, `novita` and `ollama` (local). The selected model must support embeddings; direct Ollama Cloud does not provide this adapter's embedding interface.
 
-If you try to use an unsupported model, then it will default to a simple word-overlap method. Expect reduced performance. We recommend using supported embedding APIs.
+If you try to use an unsupported model, then it will default to a simple word-overlap method. Expect reduced performance. We recommend using supported embedding APIs. Strata provides no embedding endpoint, so pair it with one of the adapters above.
 
 ## Voice Synthesis Models
 

@@ -1,0 +1,10 @@
+{
+    "name": "strata",
+
+    "cooldown": 5000,
+
+    "model": {
+        "api": "strata",
+        "model": "iq3_s"
+    }
+}
